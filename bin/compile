@@ -130,20 +130,7 @@ if [ "$METEOR_MAJOR" -gt 3 ] || ([ "$METEOR_MAJOR" -eq 3 ] && [ "$METEOR_MINOR" 
   echo "-----> Detected Meteor $METEOR_VERSION with SWC support"
   export METEOR_HAS_SWC=1
   
-  # Clear Meteor cache for SWC compatibility - this is critical
-  echo "-----> Clearing Meteor cache for SWC native binding compatibility"
-  if [ -d "$METEOR_DIR/.meteor/packages" ]; then
-    rm -rf "$METEOR_DIR/.meteor/packages"
-    echo "-----> ✅ Meteor packages cache cleared"
-  fi
-  
-  # Also clear local app cache
-  if [ -d "$APP_SOURCE_DIR/.meteor/local" ]; then
-    rm -rf "$APP_SOURCE_DIR/.meteor/local"
-    echo "-----> ✅ Local Meteor cache cleared"
-  fi
-  
-  # Force npm to use current architecture binaries
+  # Set environment variables early for SWC
   export npm_config_target_platform=linux
   export npm_config_target_arch=x64
   export npm_config_target_libc=glibc
@@ -171,6 +158,21 @@ if [ -z "$SERVER_ONLY_FLAG" ]; then
   echo "-----> Attempting to remove android platform."
   METEOR remove-platform android || true
   echo "-----> Moving on."
+fi
+
+# NOW is the right time to clear SWC caches - after we've used Meteor commands
+if [ "$METEOR_HAS_SWC" -eq 1 ]; then
+  echo "-----> Clearing Meteor cache for SWC native binding compatibility"
+  if [ -d "$METEOR_DIR/.meteor/packages" ]; then
+    rm -rf "$METEOR_DIR/.meteor/packages"
+    echo "-----> ✅ Meteor packages cache cleared"
+  fi
+  
+  # Also clear local app cache
+  if [ -d "$APP_SOURCE_DIR/.meteor/local" ]; then
+    rm -rf "$APP_SOURCE_DIR/.meteor/local"
+    echo "-----> ✅ Local Meteor cache cleared"
+  fi
 fi
 
 # Identify the npm/node to use. We need to copy the node binary out to get the
@@ -283,10 +285,8 @@ if [ "$METEOR_HAS_SWC" -eq 1 ]; then
   if ! METEOR build $BUILD_OPTIONS --server $ROOT_URL $SERVER_ONLY_FLAG --directory $BUNDLE_DEST; then
     echo "-----> First build attempt failed, trying SWC recovery strategies"
     
-    # Strategy 1: Clear all caches and rebuild Meteor packages
-    echo "-----> Strategy 1: Clearing all Meteor caches and rebuilding"
-    rm -rf "$METEOR_DIR/.meteor/packages" "$APP_SOURCE_DIR/.meteor/local" 2>/dev/null || true
-    
+    # Strategy 1: Try to rebuild packages that failed
+    echo "-----> Strategy 1: Attempting to reinstall Meteor packages"
     # Force Meteor to rebuild all packages
     if ! METEOR rebuild 2>/dev/null; then
       echo "-----> Meteor rebuild not available, continuing with build"
