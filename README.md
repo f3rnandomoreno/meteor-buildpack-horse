@@ -54,10 +54,11 @@ The following are some important environment variables for bundling and running 
 For Meteor 3.3+ apps using SWC, the buildpack automatically handles:
 
 - **Automatic SWC Detection**: Detects Meteor 3.3+ and enables SWC-specific handling
-- **Optional Dependencies**: Ensures `@swc/core` optional dependencies are installed with `--include=optional`
-- **Clean Installation**: Removes existing `node_modules` and `package-lock.json` for clean SWC binary installation
+- **Direct Binary Download**: Downloads SWC binaries directly from npm registry to avoid npm installation issues
+- **Smart Fallback**: Falls back to traditional npm install if direct download fails
 - **Enhanced Memory**: Sets `NODE_OPTIONS="--max-old-space-size=4096"` for SWC compilation
 - **Cache Optimization**: Disables Meteor's optimistic caching that can interfere with SWC
+- **Production Bundle**: Ensures SWC binaries are available in the final production bundle
 
 ### SWC Troubleshooting
 
@@ -132,6 +133,9 @@ Please help us add tips and tricks to the [wiki](https://github.com/AdmitHub/met
 - 📋 Improved error logging for SWC compilation issues
 - 🧹 Added automatic cache cleaning for SWC compatibility
 - ✅ Maintained backward compatibility with pre-SWC versions
+- 🎯 **NEW**: Direct binary download from npm registry for reliable SWC installation
+- 🔄 **NEW**: Smart fallback mechanism when direct download fails
+- 🏭 **NEW**: Production bundle SWC binary verification and installation
 
 ## Why horse?
 
