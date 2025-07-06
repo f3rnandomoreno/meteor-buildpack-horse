@@ -160,12 +160,29 @@ if [ -z "$SERVER_ONLY_FLAG" ]; then
   echo "-----> Moving on."
 fi
 
-# NOW is the right time to clear SWC caches - after we've used Meteor commands
+# Clear specific SWC-related caches - after we've used Meteor commands
 if [ "$METEOR_HAS_SWC" -eq 1 ]; then
-  echo "-----> Clearing Meteor cache for SWC native binding compatibility"
-  if [ -d "$METEOR_DIR/.meteor/packages" ]; then
-    rm -rf "$METEOR_DIR/.meteor/packages"
-    echo "-----> ✅ Meteor packages cache cleared"
+  echo "-----> Clearing SWC-specific caches for native binding compatibility"
+  
+  # Clear specific SWC problematic packages, not the entire Meteor installation
+  if [ -d "$METEOR_DIR/.meteor/packages/standard-minifier-js" ]; then
+    rm -rf "$METEOR_DIR/.meteor/packages/standard-minifier-js"
+    echo "-----> ✅ standard-minifier-js cache cleared"
+  fi
+  
+  if [ -d "$METEOR_DIR/.meteor/packages/ecmascript" ]; then
+    rm -rf "$METEOR_DIR/.meteor/packages/ecmascript"
+    echo "-----> ✅ ecmascript cache cleared"
+  fi
+  
+  if [ -d "$METEOR_DIR/.meteor/packages/typescript" ]; then
+    rm -rf "$METEOR_DIR/.meteor/packages/typescript"
+    echo "-----> ✅ typescript cache cleared"
+  fi
+  
+  if [ -d "$METEOR_DIR/.meteor/packages/babel-compiler" ]; then
+    rm -rf "$METEOR_DIR/.meteor/packages/babel-compiler"
+    echo "-----> ✅ babel-compiler cache cleared"
   fi
   
   # Also clear local app cache
