@@ -346,6 +346,100 @@ verify_swc_installation() {
   echo "-----> SWC directories in node_modules:"
   ls -la "$APP_SOURCE_DIR/node_modules/@swc/" 2>/dev/null || echo "No @swc directory found"
 }
+
+# Production-specific SWC functions (working from $COMPILE_DIR/app/programs/server)
+install_swc_binaries_production() {
+  echo "-----> Installing SWC binaries directly from registry (production)"
+  
+  # Crear directorio temporal para SWC
+  SWC_TEMP_DIR="$CACHE_DIR/swc-temp-prod"
+  mkdir -p "$SWC_TEMP_DIR"
+  
+  # Obtener URL del paquete más reciente
+  echo "-----> Fetching latest @swc/core-linux-x64-gnu package info"
+  SWC_TARBALL_URL=$(curl -sS https://registry.npmjs.org/@swc/core-linux-x64-gnu/latest | grep -o '"tarball":"[^"]*"' | cut -d'"' -f4)
+  
+  if [ -z "$SWC_TARBALL_URL" ]; then
+    echo "-----> ⚠️  Failed to get SWC tarball URL, falling back to npm install"
+    return 1
+  fi
+  
+  echo "-----> Downloading SWC binary from: $SWC_TARBALL_URL"
+  
+  # Descargar y extraer el tarball
+  if curl -sS "$SWC_TARBALL_URL" | tar -xz -C "$SWC_TEMP_DIR"; then
+    echo "-----> ✅ SWC tarball downloaded and extracted"
+  else
+    echo "-----> ❌ Failed to download SWC tarball"
+    rm -rf "$SWC_TEMP_DIR"
+    return 1
+  fi
+  
+  # Verificar que el archivo binario existe (múltiples nombres posibles)
+  SWC_BINARY_FILE=""
+  for binary_name in "swc.linux-x64-gnu.node" "*.linux-x64-gnu.node" "*.node"; do
+    if ls "$SWC_TEMP_DIR/package/"$binary_name 1> /dev/null 2>&1; then
+      SWC_BINARY_FILE=$(ls "$SWC_TEMP_DIR/package/"$binary_name | head -1)
+      break
+    fi
+  done
+  
+  if [ -n "$SWC_BINARY_FILE" ]; then
+    echo "-----> ✅ SWC binary found: $(basename "$SWC_BINARY_FILE")"
+    
+    # Crear estructura de directorios necesaria en el build de producción (current dir)
+    SWC_TARGET_DIR="node_modules/@swc/core-linux-x64-gnu"
+    mkdir -p "$SWC_TARGET_DIR"
+    
+    # Copiar el binario y archivos necesarios
+    cp -r "$SWC_TEMP_DIR/package/"* "$SWC_TARGET_DIR/"
+    
+    echo "-----> ✅ SWC binary installed successfully at $SWC_TARGET_DIR"
+    
+    # Limpiar temporal
+    rm -rf "$SWC_TEMP_DIR"
+    return 0
+  else
+    echo "-----> ❌ SWC binary not found in downloaded package"
+    echo "-----> Contents of package:"
+    ls -la "$SWC_TEMP_DIR/package/" 2>/dev/null || echo "No package directory found"
+    rm -rf "$SWC_TEMP_DIR"
+    return 1
+  fi
+}
+
+install_swc_core_production() {
+  echo "-----> Installing @swc/core package (production)"
+  
+  SWC_CORE_TEMP_DIR="$CACHE_DIR/swc-core-temp-prod"
+  mkdir -p "$SWC_CORE_TEMP_DIR"
+  
+  SWC_CORE_TARBALL_URL=$(curl -sS https://registry.npmjs.org/@swc/core/latest | grep -o '"tarball":"[^"]*"' | cut -d'"' -f4)
+  
+  if [ -n "$SWC_CORE_TARBALL_URL" ]; then
+    echo "-----> Downloading @swc/core from: $SWC_CORE_TARBALL_URL"
+    
+    if curl -sS "$SWC_CORE_TARBALL_URL" | tar -xz -C "$SWC_CORE_TEMP_DIR"; then
+      # Instalar @swc/core en el directorio actual (production)
+      SWC_CORE_TARGET_DIR="node_modules/@swc/core"
+      mkdir -p "$SWC_CORE_TARGET_DIR"
+      cp -r "$SWC_CORE_TEMP_DIR/package/"* "$SWC_CORE_TARGET_DIR/"
+      
+      echo "-----> ✅ @swc/core installed successfully at $SWC_CORE_TARGET_DIR"
+      rm -rf "$SWC_CORE_TEMP_DIR"
+      return 0
+    else
+      echo "-----> ⚠️  Failed to download @swc/core"
+      rm -rf "$SWC_CORE_TEMP_DIR"
+      return 1
+    fi
+  else
+    echo "-----> ⚠️  Failed to get @swc/core tarball URL"
+    rm -rf "$SWC_CORE_TEMP_DIR"
+    return 1
+  fi
+}
+
 # SWC Support: If we use npm on root, run npm install with proper SWC handling
 if [ -e "$APP_SOURCE_DIR"/package.json ]; then
   echo "-----> Installing npm dependencies"
@@ -483,7 +577,7 @@ if [ -e "$COMPILE_DIR"/app/programs/server/package.json ]; then
     mkdir -p node_modules/@swc
     
     # Install SWC binaries directly for production
-    if install_swc_binaries && install_swc_core; then
+    if install_swc_binaries_production && install_swc_core_production; then
       echo "-----> ✅ SWC binaries installed directly in production bundle"
       
       # Install other production dependencies excluding SWC
