@@ -129,6 +129,25 @@ METEOR_MINOR=`echo $METEOR_VERSION | cut -d. -f2`
 if [ "$METEOR_MAJOR" -gt 3 ] || ([ "$METEOR_MAJOR" -eq 3 ] && [ "$METEOR_MINOR" -ge 3 ]); then
   echo "-----> Detected Meteor $METEOR_VERSION with SWC support"
   export METEOR_HAS_SWC=1
+  
+  # Clear Meteor cache for SWC compatibility - this is critical
+  echo "-----> Clearing Meteor cache for SWC native binding compatibility"
+  if [ -d "$METEOR_DIR/.meteor/packages" ]; then
+    rm -rf "$METEOR_DIR/.meteor/packages"
+    echo "-----> ✅ Meteor packages cache cleared"
+  fi
+  
+  # Also clear local app cache
+  if [ -d "$APP_SOURCE_DIR/.meteor/local" ]; then
+    rm -rf "$APP_SOURCE_DIR/.meteor/local"
+    echo "-----> ✅ Local Meteor cache cleared"
+  fi
+  
+  # Force npm to use current architecture binaries
+  export npm_config_target_platform=linux
+  export npm_config_target_arch=x64
+  export npm_config_target_libc=glibc
+  
 else
   echo "-----> Detected Meteor $METEOR_VERSION (pre-SWC)"
   export METEOR_HAS_SWC=0
@@ -248,9 +267,46 @@ if [ "$METEOR_HAS_SWC" -eq 1 ]; then
   # Set environment variables that might help with SWC
   export NODE_OPTIONS="--max-old-space-size=4096"
   export METEOR_DISABLE_OPTIMISTIC_CACHING=1
+  # Force npm to use linux x64 binaries during build
+  export npm_config_target_platform=linux
+  export npm_config_target_arch=x64
+  export npm_config_target_libc=glibc
+  # Disable npm optional dependencies that might conflict
+  export METEOR_NPM_INSTALL_ARGS="--include=optional"
 fi
 
-METEOR build $BUILD_OPTIONS --server $ROOT_URL $SERVER_ONLY_FLAG --directory $BUNDLE_DEST
+# Run the meteor build with error handling for SWC issues
+if [ "$METEOR_HAS_SWC" -eq 1 ]; then
+  echo "-----> Attempting Meteor build with SWC error recovery"
+  
+  # First attempt with normal build
+  if ! METEOR build $BUILD_OPTIONS --server $ROOT_URL $SERVER_ONLY_FLAG --directory $BUNDLE_DEST; then
+    echo "-----> First build attempt failed, trying SWC recovery strategies"
+    
+    # Strategy 1: Clear all caches and rebuild Meteor packages
+    echo "-----> Strategy 1: Clearing all Meteor caches and rebuilding"
+    rm -rf "$METEOR_DIR/.meteor/packages" "$APP_SOURCE_DIR/.meteor/local" 2>/dev/null || true
+    
+    # Force Meteor to rebuild all packages
+    if ! METEOR rebuild 2>/dev/null; then
+      echo "-----> Meteor rebuild not available, continuing with build"
+    fi
+    
+    # Try build again
+    if ! METEOR build $BUILD_OPTIONS --server $ROOT_URL $SERVER_ONLY_FLAG --directory $BUNDLE_DEST; then
+      echo "-----> Strategy 2: Building with forced package refresh"
+      
+      # Strategy 2: Force Meteor to refresh packages
+      METEOR update --packages-only || true
+      
+      # Final attempt
+      METEOR build $BUILD_OPTIONS --server $ROOT_URL $SERVER_ONLY_FLAG --directory $BUNDLE_DEST
+    fi
+  fi
+else
+  # Standard build for pre-SWC versions
+  METEOR build $BUILD_OPTIONS --server $ROOT_URL $SERVER_ONLY_FLAG --directory $BUNDLE_DEST
+fi
 
 echo "-----> Moving built slug to $COMPILE_DIR/app"
 mv $BUNDLE_DEST/bundle "$COMPILE_DIR/app"
@@ -299,6 +355,9 @@ if [ "$METEOR_HAS_SWC" -eq 1 ]; then
   # SWC-specific environment variables
   export NODE_OPTIONS="\$NODE_OPTIONS --max-old-space-size=4096"
   export METEOR_DISABLE_OPTIMISTIC_CACHING=1
+  export npm_config_target_platform=linux
+  export npm_config_target_arch=x64
+  export npm_config_target_libc=glibc
 EOF
 fi
 
