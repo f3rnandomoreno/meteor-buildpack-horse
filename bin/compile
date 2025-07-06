@@ -260,14 +260,39 @@ install_swc_binaries() {
   if [ -n "$SWC_BINARY_FILE" ]; then
     echo "-----> ✅ SWC binary found: $(basename "$SWC_BINARY_FILE")"
     
-    # Crear estructura de directorios necesaria en el build
+    # Instalar en múltiples ubicaciones donde Meteor puede buscar
+    # 1. Project node_modules
     SWC_TARGET_DIR="$APP_SOURCE_DIR/node_modules/@swc/core-linux-x64-gnu"
     mkdir -p "$SWC_TARGET_DIR"
-    
-    # Copiar el binario y archivos necesarios
     cp -r "$SWC_TEMP_DIR/package/"* "$SWC_TARGET_DIR/"
+    echo "-----> ✅ SWC binary installed in project node_modules"
     
-    echo "-----> ✅ SWC binary installed successfully at $SWC_TARGET_DIR"
+    # 2. Meteor cache packages (donde busca internamente)
+    if [ -d "$METEOR_DIR/.meteor/packages" ]; then
+      echo "-----> Installing SWC binaries in Meteor packages cache"
+      
+      # Buscar directorios de packages que usen SWC
+      for package_dir in "$METEOR_DIR/.meteor/packages"/standard-minifier-js/.*/plugin.*/npm/node_modules/meteor/babel-compiler/node_modules/@meteorjs/swc-core; do
+        if [ -d "$(dirname "$package_dir")" ]; then
+          SWC_METEOR_DIR="$package_dir/.swc/node_modules/@swc/core-linux-x64-gnu"
+          mkdir -p "$SWC_METEOR_DIR"
+          cp -r "$SWC_TEMP_DIR/package/"* "$SWC_METEOR_DIR/"
+          echo "-----> ✅ SWC binary installed in Meteor cache: $(basename $(dirname $(dirname $(dirname "$package_dir"))))"
+        fi
+      done
+      
+      # También para ecmascript y typescript
+      for package_type in ecmascript typescript; do
+        for package_dir in "$METEOR_DIR/.meteor/packages"/$package_type/.*/plugin.*/npm/node_modules/meteor/babel-compiler/node_modules/@meteorjs/swc-core; do
+          if [ -d "$(dirname "$package_dir")" ]; then
+            SWC_METEOR_DIR="$package_dir/.swc/node_modules/@swc/core-linux-x64-gnu"
+            mkdir -p "$SWC_METEOR_DIR"
+            cp -r "$SWC_TEMP_DIR/package/"* "$SWC_METEOR_DIR/"
+            echo "-----> ✅ SWC binary installed in $package_type cache"
+          fi
+        done
+      done
+    fi
     
     # Limpiar temporal
     rm -rf "$SWC_TEMP_DIR"
@@ -294,12 +319,39 @@ install_swc_core() {
     echo "-----> Downloading @swc/core from: $SWC_CORE_TARBALL_URL"
     
     if curl -sS "$SWC_CORE_TARBALL_URL" | tar -xz -C "$SWC_CORE_TEMP_DIR"; then
-      # Instalar @swc/core
+      # 1. Instalar @swc/core en project node_modules
       SWC_CORE_TARGET_DIR="$APP_SOURCE_DIR/node_modules/@swc/core"
       mkdir -p "$SWC_CORE_TARGET_DIR"
       cp -r "$SWC_CORE_TEMP_DIR/package/"* "$SWC_CORE_TARGET_DIR/"
+      echo "-----> ✅ @swc/core installed in project node_modules"
       
-      echo "-----> ✅ @swc/core installed successfully at $SWC_CORE_TARGET_DIR"
+      # 2. Instalar en Meteor cache packages
+      if [ -d "$METEOR_DIR/.meteor/packages" ]; then
+        echo "-----> Installing @swc/core in Meteor packages cache"
+        
+        # Para standard-minifier-js
+        for package_dir in "$METEOR_DIR/.meteor/packages"/standard-minifier-js/.*/plugin.*/npm/node_modules/meteor/babel-compiler/node_modules/@meteorjs/swc-core; do
+          if [ -d "$(dirname "$package_dir")" ]; then
+            SWC_CORE_METEOR_DIR="$package_dir/.swc/node_modules/@swc/core"
+            mkdir -p "$SWC_CORE_METEOR_DIR"
+            cp -r "$SWC_CORE_TEMP_DIR/package/"* "$SWC_CORE_METEOR_DIR/"
+            echo "-----> ✅ @swc/core installed in Meteor standard-minifier-js cache"
+          fi
+        done
+        
+        # Para ecmascript y typescript
+        for package_type in ecmascript typescript; do
+          for package_dir in "$METEOR_DIR/.meteor/packages"/$package_type/.*/plugin.*/npm/node_modules/meteor/babel-compiler/node_modules/@meteorjs/swc-core; do
+            if [ -d "$(dirname "$package_dir")" ]; then
+              SWC_CORE_METEOR_DIR="$package_dir/.swc/node_modules/@swc/core"
+              mkdir -p "$SWC_CORE_METEOR_DIR"
+              cp -r "$SWC_CORE_TEMP_DIR/package/"* "$SWC_CORE_METEOR_DIR/"
+              echo "-----> ✅ @swc/core installed in Meteor $package_type cache"
+            fi
+          done
+        done
+      fi
+      
       rm -rf "$SWC_CORE_TEMP_DIR"
       return 0
     else
@@ -345,6 +397,69 @@ verify_swc_installation() {
   # Lista directorios SWC para debugging
   echo "-----> SWC directories in node_modules:"
   ls -la "$APP_SOURCE_DIR/node_modules/@swc/" 2>/dev/null || echo "No @swc directory found"
+}
+
+# Install SWC binaries in Meteor package cache (after failed build when paths exist)
+install_swc_in_meteor_cache() {
+  echo "-----> Installing SWC binaries in existing Meteor package cache"
+  
+  # Crear directorio temporal para SWC
+  SWC_TEMP_DIR="$CACHE_DIR/swc-cache-temp"
+  mkdir -p "$SWC_TEMP_DIR"
+  
+  # Descargar ambos paquetes
+  echo "-----> Downloading SWC packages for cache installation"
+  
+  # Descargar @swc/core-linux-x64-gnu
+  SWC_TARBALL_URL=$(curl -sS https://registry.npmjs.org/@swc/core-linux-x64-gnu/latest | grep -o '"tarball":"[^"]*"' | cut -d'"' -f4)
+  if [ -n "$SWC_TARBALL_URL" ]; then
+    SWC_BINARY_DIR="$SWC_TEMP_DIR/binary"
+    mkdir -p "$SWC_BINARY_DIR"
+    curl -sS "$SWC_TARBALL_URL" | tar -xz -C "$SWC_BINARY_DIR"
+    echo "-----> ✅ Downloaded @swc/core-linux-x64-gnu"
+  fi
+  
+  # Descargar @swc/core  
+  SWC_CORE_TARBALL_URL=$(curl -sS https://registry.npmjs.org/@swc/core/latest | grep -o '"tarball":"[^"]*"' | cut -d'"' -f4)
+  if [ -n "$SWC_CORE_TARBALL_URL" ]; then
+    SWC_CORE_DIR="$SWC_TEMP_DIR/core"
+    mkdir -p "$SWC_CORE_DIR"
+    curl -sS "$SWC_CORE_TARBALL_URL" | tar -xz -C "$SWC_CORE_DIR"
+    echo "-----> ✅ Downloaded @swc/core"
+  fi
+  
+  # Instalar en todas las ubicaciones encontradas en Meteor cache
+  if [ -d "$METEOR_DIR/.meteor/packages" ]; then
+    echo "-----> Searching for SWC installation targets in Meteor cache"
+    
+    # Buscar todos los directorios que contienen @meteorjs/swc-core
+    find "$METEOR_DIR/.meteor/packages" -name "@meteorjs" -type d 2>/dev/null | while read meteorjs_dir; do
+      if [ -d "$meteorjs_dir/swc-core" ]; then
+        SWC_INSTALL_DIR="$meteorjs_dir/swc-core/.swc/node_modules/@swc"
+        echo "-----> Found SWC target: $SWC_INSTALL_DIR"
+        
+        # Instalar @swc/core
+        if [ -d "$SWC_CORE_DIR/package" ]; then
+          CORE_TARGET="$SWC_INSTALL_DIR/core"
+          mkdir -p "$CORE_TARGET"
+          cp -r "$SWC_CORE_DIR/package/"* "$CORE_TARGET/"
+          echo "-----> ✅ Installed @swc/core in $(basename $(dirname $(dirname "$meteorjs_dir")))"
+        fi
+        
+        # Instalar @swc/core-linux-x64-gnu
+        if [ -d "$SWC_BINARY_DIR/package" ]; then
+          BINARY_TARGET="$SWC_INSTALL_DIR/core-linux-x64-gnu"
+          mkdir -p "$BINARY_TARGET"
+          cp -r "$SWC_BINARY_DIR/package/"* "$BINARY_TARGET/"
+          echo "-----> ✅ Installed @swc/core-linux-x64-gnu in $(basename $(dirname $(dirname "$meteorjs_dir")))"
+        fi
+      fi
+    done
+  fi
+  
+  # Limpiar temporal
+  rm -rf "$SWC_TEMP_DIR"
+  echo "-----> SWC cache installation completed"
 }
 
 # Production-specific SWC functions (working from $COMPILE_DIR/app/programs/server)
@@ -538,8 +653,12 @@ if [ "$METEOR_HAS_SWC" -eq 1 ]; then
   if ! METEOR build $BUILD_OPTIONS --server $ROOT_URL $SERVER_ONLY_FLAG --directory $BUNDLE_DEST; then
     echo "-----> First build attempt failed, trying SWC recovery strategies"
     
-    # Strategy 1: Try to rebuild packages that failed
-    echo "-----> Strategy 1: Attempting to reinstall Meteor packages"
+    # Strategy 1: Install SWC binaries in Meteor package cache locations
+    echo "-----> Strategy 1: Installing SWC binaries in Meteor package cache"
+    install_swc_in_meteor_cache
+    
+    # Strategy 2: Try to rebuild packages that failed
+    echo "-----> Strategy 2: Attempting to reinstall Meteor packages"
     # Force Meteor to rebuild all packages
     if ! METEOR rebuild 2>/dev/null; then
       echo "-----> Meteor rebuild not available, continuing with build"
@@ -547,10 +666,13 @@ if [ "$METEOR_HAS_SWC" -eq 1 ]; then
     
     # Try build again
     if ! METEOR build $BUILD_OPTIONS --server $ROOT_URL $SERVER_ONLY_FLAG --directory $BUNDLE_DEST; then
-      echo "-----> Strategy 2: Building with forced package refresh"
+      echo "-----> Strategy 3: Building with forced package refresh"
       
-      # Strategy 2: Force Meteor to refresh packages
+      # Strategy 3: Force Meteor to refresh packages
       METEOR update --packages-only || true
+      
+      # Install SWC again after package refresh
+      install_swc_in_meteor_cache
       
       # Final attempt
       METEOR build $BUILD_OPTIONS --server $ROOT_URL $SERVER_ONLY_FLAG --directory $BUNDLE_DEST
