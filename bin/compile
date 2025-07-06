@@ -581,6 +581,18 @@ if [ -e "$APP_SOURCE_DIR"/package.json ]; then
       echo "-----> Installing other npm dependencies (excluding SWC packages)"
       $METEOR_NPM install --ignore-optional
       
+      # Force rebuild of native modules for Linux x64 in development
+      echo "-----> Force rebuilding native modules for development (Linux x64)"
+      
+      # Remove and reinstall bcrypt to force compilation  
+      if [ -d "node_modules/bcrypt" ]; then
+        echo "-----> Removing existing bcrypt and reinstalling from source (development)"
+        rm -rf node_modules/bcrypt
+        $METEOR_NPM install bcrypt --build-from-source || echo "bcrypt install from source failed"
+      fi
+      
+      $METEOR_NPM rebuild --build-from-source || echo "Native modules rebuild completed with warnings"
+      
       # Verificar instalación final
       verify_swc_installation
     else
@@ -594,6 +606,10 @@ if [ -e "$APP_SOURCE_DIR"/package.json ]; then
         echo "-----> Explicitly installing @swc/core (fallback)"
         $METEOR_NPM install @swc/core --save-dev
       fi
+      
+      # Rebuild native modules for Linux x64 (fallback)
+      echo "-----> Rebuilding native modules for development (fallback)"
+      $METEOR_NPM rebuild bcrypt 2>/dev/null || echo "bcrypt rebuild skipped"
       
       # Verify SWC installation (fallback)
       echo "-----> Verifying SWC installation (fallback)"
@@ -704,10 +720,35 @@ if [ -e "$COMPILE_DIR"/app/programs/server/package.json ]; then
       
       # Install other production dependencies excluding SWC
       $METEOR_NPM install --production --ignore-optional
+      
+      # Force rebuild of native modules for Linux x64
+      echo "-----> Force rebuilding native modules for production (Linux x64)"
+      
+      # Method 1: Remove and reinstall bcrypt to force compilation
+      if [ -d "node_modules/bcrypt" ]; then
+        echo "-----> Removing existing bcrypt and reinstalling from source"
+        rm -rf node_modules/bcrypt
+        $METEOR_NPM install bcrypt --build-from-source || echo "bcrypt install from source failed"
+      fi
+      
+      # Method 2: Force rebuild all native modules
+      $METEOR_NPM rebuild --build-from-source || echo "Native modules rebuild completed with warnings"
     else
       echo "-----> ⚠️  Direct SWC install failed in production, using fallback"
       # Fallback to standard npm install with optional dependencies
       $METEOR_NPM install --production --include=optional
+      
+      # Force rebuild of native modules for Linux x64 (fallback)
+      echo "-----> Force rebuilding native modules for production (fallback)"
+      
+      # Remove and reinstall bcrypt to force compilation
+      if [ -d "node_modules/bcrypt" ]; then
+        echo "-----> Removing existing bcrypt and reinstalling from source (fallback)"
+        rm -rf node_modules/bcrypt
+        $METEOR_NPM install bcrypt --build-from-source || echo "bcrypt install from source failed"
+      fi
+      
+      $METEOR_NPM rebuild --build-from-source || echo "Native modules rebuild completed with warnings"
     fi
     
     # Check if SWC binaries are available in production bundle
