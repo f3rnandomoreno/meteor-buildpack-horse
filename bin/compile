@@ -1,7 +1,8 @@
 #!/bin/bash
 
 #
-# Heroku buildpack for Meteor
+# Heroku buildpack for Meteor with SWC support
+# Modified to handle Meteor 3.3+ SWC native bindings
 #
 
 # fail fast.
@@ -120,6 +121,19 @@ cd "$APP_SOURCE_DIR"
 
 echo "-----> Target Meteor version: `METEOR --version`"
 
+# Check if we're using Meteor 3.3+ which includes SWC
+METEOR_VERSION=`METEOR --version | grep -o '[0-9]\+\.[0-9]\+' | head -1`
+METEOR_MAJOR=`echo $METEOR_VERSION | cut -d. -f1`
+METEOR_MINOR=`echo $METEOR_VERSION | cut -d. -f2`
+
+if [ "$METEOR_MAJOR" -gt 3 ] || ([ "$METEOR_MAJOR" -eq 3 ] && [ "$METEOR_MINOR" -ge 3 ]); then
+  echo "-----> Detected Meteor $METEOR_VERSION with SWC support"
+  export METEOR_HAS_SWC=1
+else
+  echo "-----> Detected Meteor $METEOR_VERSION (pre-SWC)"
+  export METEOR_HAS_SWC=0
+fi
+
 # Deal with non-server build targets.  Determine if we have --server-only flag
 # capability (Meteor 1.3 and up).
 echo "-----> Checking if this meteor version supports --server-only"
@@ -168,10 +182,45 @@ PATH="$METEOR_DIR/.meteor:`dirname $METEOR_NPM`:$COMPILE_DIR/bin:$PATH"
 echo "-----> Using node: `$NODE --version`"
 echo "----->    and npm: `$METEOR_NPM --version`"
 
-# If we use npm on root, run npm install.  Don't use `--production` here, as we
-# may need devDependencies (e.g. webpack) in order to build the meteor app.
+# SWC Support: If we use npm on root, run npm install with proper SWC handling
 if [ -e "$APP_SOURCE_DIR"/package.json ]; then
-  $METEOR_NPM install
+  echo "-----> Installing npm dependencies"
+  
+  if [ "$METEOR_HAS_SWC" -eq 1 ]; then
+    echo "-----> SWC detected: Ensuring optional dependencies are installed"
+    
+    # Clear npm cache to avoid SWC binding issues
+    echo "-----> Clearing npm cache for SWC compatibility"
+    $METEOR_NPM cache clean --force || true
+    
+    # Remove node_modules and package-lock.json to ensure clean SWC install
+    echo "-----> Removing existing node_modules for clean SWC installation"
+    rm -rf node_modules package-lock.json || true
+    
+    # Install with explicit optional dependencies enabled
+    echo "-----> Installing dependencies with SWC optional binaries"
+    $METEOR_NPM install --include=optional
+    
+    # Explicitly install SWC core if it's in devDependencies
+    if grep -q "@swc/core" package.json; then
+      echo "-----> Explicitly installing @swc/core"
+      $METEOR_NPM install @swc/core --save-dev
+    fi
+    
+    # Verify SWC installation
+    echo "-----> Verifying SWC installation"
+    if [ -d "node_modules/@swc/core" ]; then
+      echo "-----> ✅ SWC core found in node_modules"
+      # List available SWC bindings for debugging
+      echo "-----> Available SWC bindings:"
+      ls -la node_modules/@swc/core* 2>/dev/null || echo "No SWC core bindings directory found"
+    else
+      echo "-----> ⚠️  SWC core not found in node_modules"
+    fi
+  else
+    # Standard npm install for pre-SWC versions
+    $METEOR_NPM install
+  fi
 fi
 
 # Related to https://github.com/meteor/meteor/issues/2796 and
@@ -193,6 +242,14 @@ echo "-----> Building Meteor app with ROOT_URL: $ROOT_URL"
 BUNDLE_DEST=`mktemp -d "$BUILDPACK_DIR/build-XXXX"`
 
 # The actual invocation of `meteor build`!
+# For SWC versions, we might need additional environment variables
+if [ "$METEOR_HAS_SWC" -eq 1 ]; then
+  echo "-----> Building with SWC support"
+  # Set environment variables that might help with SWC
+  export NODE_OPTIONS="--max-old-space-size=4096"
+  export METEOR_DISABLE_OPTIMISTIC_CACHING=1
+fi
+
 METEOR build $BUILD_OPTIONS --server $ROOT_URL $SERVER_ONLY_FLAG --directory $BUNDLE_DEST
 
 echo "-----> Moving built slug to $COMPILE_DIR/app"
@@ -203,7 +260,22 @@ rmdir $BUNDLE_DEST
 echo "-----> Installing npm production dependencies on built slug"
 if [ -e "$COMPILE_DIR"/app/programs/server/package.json ]; then
   cd "$COMPILE_DIR"/app/programs/server
-  $METEOR_NPM install --production
+  
+  if [ "$METEOR_HAS_SWC" -eq 1 ]; then
+    echo "-----> Installing production dependencies with SWC support"
+    # For production, we need to ensure SWC binaries are available
+    $METEOR_NPM install --production --include=optional
+    
+    # Check if SWC binaries are available in production bundle
+    if [ -d "node_modules/@swc" ]; then
+      echo "-----> ✅ SWC binaries available in production bundle"
+    else
+      echo "-----> ⚠️  SWC binaries not found in production bundle"
+    fi
+  else
+    $METEOR_NPM install --production
+  fi
+  
   cd "$APP_SOURCE_DIR"
 fi
 
@@ -218,6 +290,17 @@ cat > "$APP_CHECKOUT_DIR"/.profile.d/path.sh <<EOF
   export PATH=\$HOME/$COMPILE_DIR_SUFFIX/bin:\$PATH
   export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:\$HOME/$COMPILE_DIR_SUFFIX/lib
 EOF
+
+# Add SWC-specific environment variables if needed
+if [ "$METEOR_HAS_SWC" -eq 1 ]; then
+  echo "-----> Adding SWC environment variables"
+  cat > "$APP_CHECKOUT_DIR"/.profile.d/swc.sh <<EOF
+  #!/bin/sh
+  # SWC-specific environment variables
+  export NODE_OPTIONS="\$NODE_OPTIONS --max-old-space-size=4096"
+  export METEOR_DISABLE_OPTIMISTIC_CACHING=1
+EOF
+fi
 
 #
 # Extras
