@@ -735,30 +735,33 @@ if [ -e "$COMPILE_DIR"/app/programs/server/package.json ]; then
       METEOR_BCRYPT_PATH="npm/node_modules/meteor/accounts-password/node_modules/bcrypt"
       if [ -d "$METEOR_BCRYPT_PATH" ]; then
         echo "-----> Found Meteor internal bcrypt at $METEOR_BCRYPT_PATH"
-        echo "-----> Removing and rebuilding bcrypt for Linux x64 compatibility"
+        echo "-----> Rebuilding bcrypt native bindings for Linux x64"
 
-        # Save the package version
+        # Save the package version for logging
         BCRYPT_VERSION=$(grep '"version"' "$METEOR_BCRYPT_PATH/package.json" | head -1 | sed 's/.*: "\(.*\)".*/\1/')
         echo "-----> Detected bcrypt version: $BCRYPT_VERSION"
 
-        # Remove the entire bcrypt directory
-        rm -rf "$METEOR_BCRYPT_PATH"
+        # Remove only the native binary files (not the whole package)
+        echo "-----> Removing macOS bcrypt binaries"
+        find "$METEOR_BCRYPT_PATH" -name "*.node" -type f -delete
 
-        # Create parent directory if needed
-        mkdir -p "npm/node_modules/meteor/accounts-password/node_modules"
-
-        # Install bcrypt from source for the detected version
-        cd "npm/node_modules/meteor/accounts-password"
-        echo "-----> Installing bcrypt@$BCRYPT_VERSION from source..."
-        $METEOR_NPM install "bcrypt@$BCRYPT_VERSION" --build-from-source --target_platform=linux --target_arch=x64 --target_libc=glibc || echo "⚠️  bcrypt install from source failed, but continuing..."
+        # Rebuild bcrypt from source using node-gyp
+        echo "-----> Rebuilding bcrypt native bindings..."
+        cd "$METEOR_BCRYPT_PATH"
+        $METEOR_NPM run install --build-from-source 2>&1 | head -20 || {
+          echo "⚠️  npm run install failed, trying node-gyp directly"
+          npx node-gyp rebuild 2>&1 | head -20 || echo "⚠️  node-gyp rebuild failed"
+        }
         cd "$COMPILE_DIR"/app/programs/server
 
         # Verify the binary was built for Linux
         if [ -f "$METEOR_BCRYPT_PATH/lib/binding/napi-v3/bcrypt_lib.node" ]; then
-          echo "-----> ✅ bcrypt binary rebuilt successfully"
+          echo "-----> ✅ bcrypt binary rebuilt successfully for Linux"
           file "$METEOR_BCRYPT_PATH/lib/binding/napi-v3/bcrypt_lib.node" || true
         else
           echo "-----> ⚠️  bcrypt binary not found at expected location"
+          echo "-----> Listing bcrypt directory structure:"
+          ls -la "$METEOR_BCRYPT_PATH/lib/binding/" 2>&1 | head -10 || true
         fi
       else
         echo "-----> Meteor internal bcrypt not found (may not be using accounts-password)"
@@ -785,30 +788,33 @@ if [ -e "$COMPILE_DIR"/app/programs/server/package.json ]; then
       METEOR_BCRYPT_PATH="npm/node_modules/meteor/accounts-password/node_modules/bcrypt"
       if [ -d "$METEOR_BCRYPT_PATH" ]; then
         echo "-----> Found Meteor internal bcrypt at $METEOR_BCRYPT_PATH (fallback)"
-        echo "-----> Removing and rebuilding bcrypt for Linux x64 compatibility (fallback)"
+        echo "-----> Rebuilding bcrypt native bindings for Linux x64 (fallback)"
 
-        # Save the package version
+        # Save the package version for logging
         BCRYPT_VERSION=$(grep '"version"' "$METEOR_BCRYPT_PATH/package.json" | head -1 | sed 's/.*: "\(.*\)".*/\1/')
         echo "-----> Detected bcrypt version: $BCRYPT_VERSION"
 
-        # Remove the entire bcrypt directory
-        rm -rf "$METEOR_BCRYPT_PATH"
+        # Remove only the native binary files (not the whole package)
+        echo "-----> Removing macOS bcrypt binaries (fallback)"
+        find "$METEOR_BCRYPT_PATH" -name "*.node" -type f -delete
 
-        # Create parent directory if needed
-        mkdir -p "npm/node_modules/meteor/accounts-password/node_modules"
-
-        # Install bcrypt from source for the detected version
-        cd "npm/node_modules/meteor/accounts-password"
-        echo "-----> Installing bcrypt@$BCRYPT_VERSION from source... (fallback)"
-        $METEOR_NPM install "bcrypt@$BCRYPT_VERSION" --build-from-source --target_platform=linux --target_arch=x64 --target_libc=glibc || echo "⚠️  bcrypt install from source failed, but continuing..."
+        # Rebuild bcrypt from source using node-gyp
+        echo "-----> Rebuilding bcrypt native bindings (fallback)..."
+        cd "$METEOR_BCRYPT_PATH"
+        $METEOR_NPM run install --build-from-source 2>&1 | head -20 || {
+          echo "⚠️  npm run install failed, trying node-gyp directly"
+          npx node-gyp rebuild 2>&1 | head -20 || echo "⚠️  node-gyp rebuild failed"
+        }
         cd "$COMPILE_DIR"/app/programs/server
 
         # Verify the binary was built for Linux
         if [ -f "$METEOR_BCRYPT_PATH/lib/binding/napi-v3/bcrypt_lib.node" ]; then
-          echo "-----> ✅ bcrypt binary rebuilt successfully (fallback)"
+          echo "-----> ✅ bcrypt binary rebuilt successfully for Linux (fallback)"
           file "$METEOR_BCRYPT_PATH/lib/binding/napi-v3/bcrypt_lib.node" || true
         else
           echo "-----> ⚠️  bcrypt binary not found at expected location (fallback)"
+          echo "-----> Listing bcrypt directory structure:"
+          ls -la "$METEOR_BCRYPT_PATH/lib/binding/" 2>&1 | head -10 || true
         fi
       else
         echo "-----> Meteor internal bcrypt not found (fallback)"
