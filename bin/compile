@@ -767,6 +767,42 @@ if [ -e "$COMPILE_DIR"/app/programs/server/package.json ]; then
         echo "-----> Meteor internal bcrypt not found (may not be using accounts-password)"
       fi
 
+      # Method 2.5: Handle Meteor's internal argon2 (in accounts-password)
+      METEOR_ARGON2_PATH="npm/node_modules/meteor/accounts-password/node_modules/argon2"
+      if [ -d "$METEOR_ARGON2_PATH" ]; then
+        echo "-----> Found Meteor internal argon2 at $METEOR_ARGON2_PATH"
+        echo "-----> Rebuilding argon2 native bindings for Linux x64"
+
+        # Save the package version for logging
+        ARGON2_VERSION=$(grep '"version"' "$METEOR_ARGON2_PATH/package.json" | head -1 | sed 's/.*: "\(.*\)".*/\1/')
+        echo "-----> Detected argon2 version: $ARGON2_VERSION"
+
+        # Remove only the native binary files (not the whole package)
+        echo "-----> Removing macOS argon2 binaries"
+        find "$METEOR_ARGON2_PATH" -name "*.node" -type f -delete
+
+        # Rebuild argon2 from source using node-gyp
+        echo "-----> Rebuilding argon2 native bindings..."
+        cd "$METEOR_ARGON2_PATH"
+        $METEOR_NPM run install --build-from-source 2>&1 | head -20 || {
+          echo "⚠️  npm run install failed, trying node-gyp directly"
+          npx node-gyp rebuild 2>&1 | head -20 || echo "⚠️  node-gyp rebuild failed"
+        }
+        cd "$COMPILE_DIR"/app/programs/server
+
+        # Verify the binary was built for Linux
+        if [ -f "$METEOR_ARGON2_PATH/lib/binding/napi-v3/argon2.node" ]; then
+          echo "-----> ✅ argon2 binary rebuilt successfully for Linux"
+          file "$METEOR_ARGON2_PATH/lib/binding/napi-v3/argon2.node" || true
+        else
+          echo "-----> ⚠️  argon2 binary not found at expected location"
+          echo "-----> Listing argon2 directory structure:"
+          ls -la "$METEOR_ARGON2_PATH/lib/" 2>&1 | head -10 || true
+        fi
+      else
+        echo "-----> Meteor internal argon2 not found (may not be using accounts-password)"
+      fi
+
       # Method 3: Force rebuild all native modules
       $METEOR_NPM rebuild --build-from-source || echo "Native modules rebuild completed with warnings"
     else
@@ -818,6 +854,42 @@ if [ -e "$COMPILE_DIR"/app/programs/server/package.json ]; then
         fi
       else
         echo "-----> Meteor internal bcrypt not found (fallback)"
+      fi
+
+      # Handle Meteor's internal argon2 (in accounts-password) - fallback
+      METEOR_ARGON2_PATH="npm/node_modules/meteor/accounts-password/node_modules/argon2"
+      if [ -d "$METEOR_ARGON2_PATH" ]; then
+        echo "-----> Found Meteor internal argon2 at $METEOR_ARGON2_PATH (fallback)"
+        echo "-----> Rebuilding argon2 native bindings for Linux x64 (fallback)"
+
+        # Save the package version for logging
+        ARGON2_VERSION=$(grep '"version"' "$METEOR_ARGON2_PATH/package.json" | head -1 | sed 's/.*: "\(.*\)".*/\1/')
+        echo "-----> Detected argon2 version: $ARGON2_VERSION"
+
+        # Remove only the native binary files (not the whole package)
+        echo "-----> Removing macOS argon2 binaries (fallback)"
+        find "$METEOR_ARGON2_PATH" -name "*.node" -type f -delete
+
+        # Rebuild argon2 from source using node-gyp
+        echo "-----> Rebuilding argon2 native bindings (fallback)..."
+        cd "$METEOR_ARGON2_PATH"
+        $METEOR_NPM run install --build-from-source 2>&1 | head -20 || {
+          echo "⚠️  npm run install failed, trying node-gyp directly"
+          npx node-gyp rebuild 2>&1 | head -20 || echo "⚠️  node-gyp rebuild failed"
+        }
+        cd "$COMPILE_DIR"/app/programs/server
+
+        # Verify the binary was built for Linux
+        if [ -f "$METEOR_ARGON2_PATH/lib/binding/napi-v3/argon2.node" ]; then
+          echo "-----> ✅ argon2 binary rebuilt successfully for Linux (fallback)"
+          file "$METEOR_ARGON2_PATH/lib/binding/napi-v3/argon2.node" || true
+        else
+          echo "-----> ⚠️  argon2 binary not found at expected location (fallback)"
+          echo "-----> Listing argon2 directory structure:"
+          ls -la "$METEOR_ARGON2_PATH/lib/" 2>&1 | head -10 || true
+        fi
+      else
+        echo "-----> Meteor internal argon2 not found (fallback)"
       fi
 
       $METEOR_NPM rebuild --build-from-source || echo "Native modules rebuild completed with warnings"
