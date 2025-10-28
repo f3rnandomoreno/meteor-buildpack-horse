@@ -748,21 +748,23 @@ if [ -e "$COMPILE_DIR"/app/programs/server/package.json ]; then
         # Rebuild bcrypt from source using node-gyp
         echo "-----> Rebuilding bcrypt native bindings..."
         cd "$METEOR_BCRYPT_PATH"
-        $METEOR_NPM run install --build-from-source 2>&1 | head -20 || {
-          echo "⚠️  npm run install failed, trying node-gyp directly"
-          npx node-gyp rebuild 2>&1 | head -20 || echo "⚠️  node-gyp rebuild failed"
-        }
-        cd "$COMPILE_DIR"/app/programs/server
+        npx node-gyp rebuild 2>&1 | tail -20 || echo "⚠️  node-gyp rebuild failed"
 
-        # Verify the binary was built for Linux
-        if [ -f "$METEOR_BCRYPT_PATH/lib/binding/napi-v3/bcrypt_lib.node" ]; then
-          echo "-----> ✅ bcrypt binary rebuilt successfully for Linux"
-          file "$METEOR_BCRYPT_PATH/lib/binding/napi-v3/bcrypt_lib.node" || true
+        # bcrypt uses node-pre-gyp which expects binaries in lib/binding/napi-v3/
+        # Copy the compiled binary to the location node-pre-gyp expects
+        if [ -f "build/Release/bcrypt_lib.node" ]; then
+          echo "-----> Creating binding structure for node-pre-gyp"
+          mkdir -p lib/binding/napi-v3
+          cp build/Release/bcrypt_lib.node lib/binding/napi-v3/bcrypt_lib.node
+          echo "-----> ✅ bcrypt binary copied to lib/binding/napi-v3/bcrypt_lib.node"
+          file lib/binding/napi-v3/bcrypt_lib.node || true
         else
-          echo "-----> ⚠️  bcrypt binary not found at expected location"
-          echo "-----> Listing bcrypt directory structure:"
-          ls -la "$METEOR_BCRYPT_PATH/lib/binding/" 2>&1 | head -10 || true
+          echo "-----> ⚠️  bcrypt binary not found at build/Release/bcrypt_lib.node"
+          echo "-----> Listing build directory:"
+          ls -la build/ 2>&1 | head -10 || echo "No build directory found"
         fi
+
+        cd "$COMPILE_DIR"/app/programs/server
       else
         echo "-----> Meteor internal bcrypt not found (may not be using accounts-password)"
       fi
@@ -840,21 +842,23 @@ if [ -e "$COMPILE_DIR"/app/programs/server/package.json ]; then
         # Rebuild bcrypt from source using node-gyp
         echo "-----> Rebuilding bcrypt native bindings (fallback)..."
         cd "$METEOR_BCRYPT_PATH"
-        $METEOR_NPM run install --build-from-source 2>&1 | head -20 || {
-          echo "⚠️  npm run install failed, trying node-gyp directly"
-          npx node-gyp rebuild 2>&1 | head -20 || echo "⚠️  node-gyp rebuild failed"
-        }
-        cd "$COMPILE_DIR"/app/programs/server
+        npx node-gyp rebuild 2>&1 | tail -20 || echo "⚠️  node-gyp rebuild failed"
 
-        # Verify the binary was built for Linux
-        if [ -f "$METEOR_BCRYPT_PATH/lib/binding/napi-v3/bcrypt_lib.node" ]; then
-          echo "-----> ✅ bcrypt binary rebuilt successfully for Linux (fallback)"
-          file "$METEOR_BCRYPT_PATH/lib/binding/napi-v3/bcrypt_lib.node" || true
+        # bcrypt uses node-pre-gyp which expects binaries in lib/binding/napi-v3/
+        # Copy the compiled binary to the location node-pre-gyp expects
+        if [ -f "build/Release/bcrypt_lib.node" ]; then
+          echo "-----> Creating binding structure for node-pre-gyp (fallback)"
+          mkdir -p lib/binding/napi-v3
+          cp build/Release/bcrypt_lib.node lib/binding/napi-v3/bcrypt_lib.node
+          echo "-----> ✅ bcrypt binary copied to lib/binding/napi-v3/bcrypt_lib.node (fallback)"
+          file lib/binding/napi-v3/bcrypt_lib.node || true
         else
-          echo "-----> ⚠️  bcrypt binary not found at expected location (fallback)"
-          echo "-----> Listing bcrypt directory structure:"
-          ls -la "$METEOR_BCRYPT_PATH/lib/binding/" 2>&1 | head -10 || true
+          echo "-----> ⚠️  bcrypt binary not found at build/Release/bcrypt_lib.node (fallback)"
+          echo "-----> Listing build directory:"
+          ls -la build/ 2>&1 | head -10 || echo "No build directory found"
         fi
+
+        cd "$COMPILE_DIR"/app/programs/server
       else
         echo "-----> Meteor internal bcrypt not found (fallback)"
       fi
