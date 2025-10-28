@@ -606,40 +606,58 @@ if [ -n "$BUILDPACK_PRELAUNCH_METEOR" ] || [ "$METEOR_HAS_SWC" -eq 1 ]; then
     install_swc_in_meteor_cache() {
       echo "-----> Downloading SWC packages for cache installation"
 
-      SWC_BINARY_TEMP_DIR="$CACHE_DIR/swc-binary-install"
-      SWC_CORE_TEMP_DIR="$CACHE_DIR/swc-core-install"
-      mkdir -p "$SWC_BINARY_TEMP_DIR" "$SWC_CORE_TEMP_DIR"
+      SWC_TEMP_DIR="$CACHE_DIR/swc-cache-optimized"
+      mkdir -p "$SWC_TEMP_DIR"
 
       # Download @swc/core-linux-x64-gnu
-      SWC_BINARY_URL=$(curl -sS https://registry.npmjs.org/@swc/core-linux-x64-gnu/latest | grep -o '"tarball":"[^"]*"' | cut -d'"' -f4)
-      if [ -n "$SWC_BINARY_URL" ]; then
-        curl -sS "$SWC_BINARY_URL" | tar -xz -C "$SWC_BINARY_TEMP_DIR"
+      SWC_TARBALL_URL=$(curl -sS https://registry.npmjs.org/@swc/core-linux-x64-gnu/latest | grep -o '"tarball":"[^"]*"' | cut -d'"' -f4)
+      if [ -n "$SWC_TARBALL_URL" ]; then
+        SWC_BINARY_DIR="$SWC_TEMP_DIR/binary"
+        mkdir -p "$SWC_BINARY_DIR"
+        curl -sS "$SWC_TARBALL_URL" | tar -xz -C "$SWC_BINARY_DIR"
         echo "-----> ✅ Downloaded @swc/core-linux-x64-gnu"
       fi
 
       # Download @swc/core
-      SWC_CORE_URL=$(curl -sS https://registry.npmjs.org/@swc/core/latest | grep -o '"tarball":"[^"]*"' | cut -d'"' -f4)
-      if [ -n "$SWC_CORE_URL" ]; then
-        curl -sS "$SWC_CORE_URL" | tar -xz -C "$SWC_CORE_TEMP_DIR"
+      SWC_CORE_TARBALL_URL=$(curl -sS https://registry.npmjs.org/@swc/core/latest | grep -o '"tarball":"[^"]*"' | cut -d'"' -f4)
+      if [ -n "$SWC_CORE_TARBALL_URL" ]; then
+        SWC_CORE_DIR="$SWC_TEMP_DIR/core"
+        mkdir -p "$SWC_CORE_DIR"
+        curl -sS "$SWC_CORE_TARBALL_URL" | tar -xz -C "$SWC_CORE_DIR"
         echo "-----> ✅ Downloaded @swc/core"
       fi
 
       # Install in all Meteor package cache locations
-      for package_dir in "$METEOR_DIR"/.meteor/packages/*/.*/**/node_modules/meteor/babel-compiler/node_modules/@meteorjs/swc-core/.swc/node_modules/@swc; do
-        if [ -d "$(dirname "$package_dir")" ]; then
-          # Install @swc/core
-          mkdir -p "$package_dir/core"
-          cp -r "$SWC_CORE_TEMP_DIR/package/"* "$package_dir/core/" 2>/dev/null || true
+      if [ -d "$METEOR_DIR/.meteor/packages" ]; then
+        echo "-----> Searching for SWC installation targets in Meteor cache"
 
-          # Install @swc/core-linux-x64-gnu
-          mkdir -p "$package_dir/core-linux-x64-gnu"
-          cp -r "$SWC_BINARY_TEMP_DIR/package/"* "$package_dir/core-linux-x64-gnu/" 2>/dev/null || true
+        # Find all @meteorjs directories (same approach as recovery strategy)
+        find "$METEOR_DIR/.meteor/packages" -name "@meteorjs" -type d 2>/dev/null | while read meteorjs_dir; do
+          if [ -d "$meteorjs_dir/swc-core" ]; then
+            SWC_INSTALL_DIR="$meteorjs_dir/swc-core/.swc/node_modules/@swc"
+            echo "-----> Found SWC target: $SWC_INSTALL_DIR"
 
-          echo "-----> ✅ Installed SWC in $(basename $(dirname $(dirname $(dirname "$package_dir"))))"
-        fi
-      done
+            # Install @swc/core
+            if [ -d "$SWC_CORE_DIR/package" ]; then
+              CORE_TARGET="$SWC_INSTALL_DIR/core"
+              mkdir -p "$CORE_TARGET"
+              cp -r "$SWC_CORE_DIR/package/"* "$CORE_TARGET/"
+              echo "-----> ✅ Installed @swc/core in $(basename $(dirname $(dirname "$meteorjs_dir")))"
+            fi
 
-      rm -rf "$SWC_BINARY_TEMP_DIR" "$SWC_CORE_TEMP_DIR"
+            # Install @swc/core-linux-x64-gnu
+            if [ -d "$SWC_BINARY_DIR/package" ]; then
+              BINARY_TARGET="$SWC_INSTALL_DIR/core-linux-x64-gnu"
+              mkdir -p "$BINARY_TARGET"
+              cp -r "$SWC_BINARY_DIR/package/"* "$BINARY_TARGET/"
+              echo "-----> ✅ Installed @swc/core-linux-x64-gnu in $(basename $(dirname $(dirname "$meteorjs_dir")))"
+            fi
+          fi
+        done
+      fi
+
+      rm -rf "$SWC_TEMP_DIR"
+      echo "-----> SWC cache installation completed"
     }
 
     install_swc_in_meteor_cache
