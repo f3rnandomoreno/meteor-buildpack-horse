@@ -560,68 +560,26 @@ if [ -e "$APP_SOURCE_DIR"/package.json ]; then
   echo "-----> Installing npm dependencies"
   
   if [ "$METEOR_HAS_SWC" -eq 1 ]; then
-    echo "-----> SWC detected: Installing SWC binaries directly from registry"
-    
+    echo "-----> SWC detected: Optimized installation (skip node_modules, install directly to Meteor cache)"
+
     # Clear npm cache to avoid SWC binding issues
     echo "-----> Clearing npm cache for SWC compatibility"
     $METEOR_NPM cache clean --force || true
-    
-    # Remove node_modules and package-lock.json to ensure clean SWC install
+
+    # Remove node_modules and package-lock.json to ensure clean install
     echo "-----> Removing existing node_modules for clean SWC installation"
     rm -rf node_modules package-lock.json || true
-    
-    # Create node_modules directory structure
-    mkdir -p node_modules/@swc
-    
-    # Intentar instalar binarios directamente
-    if install_swc_binaries && install_swc_core; then
-      echo "-----> ✅ SWC binaries installed directly from registry"
-      
-      # Instalar otras dependencias sin conflictos SWC
-      echo "-----> Installing other npm dependencies (excluding SWC packages)"
-      $METEOR_NPM install --ignore-optional
-      
-      # Force rebuild of native modules for Linux x64 in development
-      echo "-----> Force rebuilding native modules for development (Linux x64)"
-      
-      # Remove and reinstall bcrypt to force compilation  
-      if [ -d "node_modules/bcrypt" ]; then
-        echo "-----> Removing existing bcrypt and reinstalling from source (development)"
-        rm -rf node_modules/bcrypt
-        $METEOR_NPM install bcrypt --build-from-source || echo "bcrypt install from source failed"
-      fi
-      
-      $METEOR_NPM rebuild --build-from-source || echo "Native modules rebuild completed with warnings"
-      
-      # Verificar instalación final
-      verify_swc_installation
-    else
-      echo "-----> ⚠️  Direct SWC install failed, falling back to npm install"
-      # Fallback al método original
-      echo "-----> Installing dependencies with SWC optional binaries (fallback)"
-      $METEOR_NPM install --include=optional
-      
-      # Explicitly install SWC core if it's in devDependencies
-      if grep -q "@swc/core" package.json; then
-        echo "-----> Explicitly installing @swc/core (fallback)"
-        $METEOR_NPM install @swc/core --save-dev
-      fi
-      
-      # Rebuild native modules for Linux x64 (fallback)
-      echo "-----> Rebuilding native modules for development (fallback)"
-      $METEOR_NPM rebuild bcrypt 2>/dev/null || echo "bcrypt rebuild skipped"
-      
-      # Verify SWC installation (fallback)
-      echo "-----> Verifying SWC installation (fallback)"
-      if [ -d "node_modules/@swc/core" ]; then
-        echo "-----> ✅ SWC core found in node_modules"
-        # List available SWC bindings for debugging
-        echo "-----> Available SWC bindings:"
-        ls -la node_modules/@swc/core* 2>/dev/null || echo "No SWC core bindings directory found"
-      else
-        echo "-----> ⚠️  SWC core not found in node_modules"
-      fi
-    fi
+
+    # Install regular npm dependencies WITHOUT SWC (it will fail anyway in node_modules)
+    echo "-----> Installing npm dependencies (SWC will be installed in Meteor cache later)"
+    $METEOR_NPM install --ignore-optional
+
+    # Force rebuild of native modules for Linux x64 in development
+    echo "-----> Force rebuilding native modules for development (Linux x64)"
+    $METEOR_NPM rebuild --build-from-source || echo "Native modules rebuild completed with warnings"
+
+    # OPTIMIZATION: We'll install SWC in Meteor cache after pre-launch creates the directories
+    echo "-----> ✅ npm dependencies installed (SWC will be installed in Meteor cache)"
   else
     # Standard npm install for pre-SWC versions
     $METEOR_NPM install
@@ -632,12 +590,61 @@ fi
 # https://github.com/meteor/meteor/issues/2606.  Some packages only build their
 # assets at runtime, and thus they are not available for bundling unless meteor
 # has been launched.  To opt-in to this, set BUILDPACK_PRELAUNCH_METEOR=1.
-if [ -n "$BUILDPACK_PRELAUNCH_METEOR" ]; then
-  echo "-----> BUILDPACK_PRELAUNCH_METEOR: Pre-launching meteor to build packages assets"
+# OPTIMIZATION: For SWC (Meteor 3.3+), we ALWAYS pre-launch to create cache directories
+if [ -n "$BUILDPACK_PRELAUNCH_METEOR" ] || [ "$METEOR_HAS_SWC" -eq 1 ]; then
+  echo "-----> Pre-launching meteor to build packages assets and create cache directories"
   # Remove the Android platform because it fails due to the Android tools not
   # being installed, but leave the iOS platform because it's ignored.
   METEOR remove-platform android || true
-  HOME=$METEOR_DIR timeout -s9 60 $METEOR_DIR/.meteor/meteor --settings settings.json || true
+  HOME=$METEOR_DIR timeout -s9 60 $METEOR_DIR/.meteor/meteor --settings settings.json 2>&1 | head -20 || true
+
+  # OPTIMIZATION: Install SWC in Meteor cache after pre-launch creates directories
+  if [ "$METEOR_HAS_SWC" -eq 1 ]; then
+    echo "-----> Installing SWC binaries in Meteor package cache (optimized path)"
+
+    # Use the same function from recovery but run it now
+    install_swc_in_meteor_cache() {
+      echo "-----> Downloading SWC packages for cache installation"
+
+      SWC_BINARY_TEMP_DIR="$CACHE_DIR/swc-binary-install"
+      SWC_CORE_TEMP_DIR="$CACHE_DIR/swc-core-install"
+      mkdir -p "$SWC_BINARY_TEMP_DIR" "$SWC_CORE_TEMP_DIR"
+
+      # Download @swc/core-linux-x64-gnu
+      SWC_BINARY_URL=$(curl -sS https://registry.npmjs.org/@swc/core-linux-x64-gnu/latest | grep -o '"tarball":"[^"]*"' | cut -d'"' -f4)
+      if [ -n "$SWC_BINARY_URL" ]; then
+        curl -sS "$SWC_BINARY_URL" | tar -xz -C "$SWC_BINARY_TEMP_DIR"
+        echo "-----> ✅ Downloaded @swc/core-linux-x64-gnu"
+      fi
+
+      # Download @swc/core
+      SWC_CORE_URL=$(curl -sS https://registry.npmjs.org/@swc/core/latest | grep -o '"tarball":"[^"]*"' | cut -d'"' -f4)
+      if [ -n "$SWC_CORE_URL" ]; then
+        curl -sS "$SWC_CORE_URL" | tar -xz -C "$SWC_CORE_TEMP_DIR"
+        echo "-----> ✅ Downloaded @swc/core"
+      fi
+
+      # Install in all Meteor package cache locations
+      for package_dir in "$METEOR_DIR"/.meteor/packages/*/.*/**/node_modules/meteor/babel-compiler/node_modules/@meteorjs/swc-core/.swc/node_modules/@swc; do
+        if [ -d "$(dirname "$package_dir")" ]; then
+          # Install @swc/core
+          mkdir -p "$package_dir/core"
+          cp -r "$SWC_CORE_TEMP_DIR/package/"* "$package_dir/core/" 2>/dev/null || true
+
+          # Install @swc/core-linux-x64-gnu
+          mkdir -p "$package_dir/core-linux-x64-gnu"
+          cp -r "$SWC_BINARY_TEMP_DIR/package/"* "$package_dir/core-linux-x64-gnu/" 2>/dev/null || true
+
+          echo "-----> ✅ Installed SWC in $(basename $(dirname $(dirname $(dirname "$package_dir"))))"
+        fi
+      done
+
+      rm -rf "$SWC_BINARY_TEMP_DIR" "$SWC_CORE_TEMP_DIR"
+    }
+
+    install_swc_in_meteor_cache
+    echo "-----> ✅ SWC installation in Meteor cache completed"
+  fi
 fi
 
 # Now on to bundling. Don't put the bundle in $APP_CHECKOUT_DIR during
